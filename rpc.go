@@ -3,6 +3,7 @@ package routedrpc
 import (
 	"bytes"
 	"encoding/gob"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,6 +26,7 @@ func Create(options *Options) (*Rpc, error) {
 	rpc := &Rpc{
 		options: options,
 		cache:   newCache(options.ArpCacheSize),
+		pending: make(map[uint64]*Call),
 	}
 
 	options.Delegate = &memberlistDelegate{rpc}
@@ -40,10 +42,35 @@ func Create(options *Options) (*Rpc, error) {
 	return rpc, nil
 }
 
+func (r *Rpc) Join(existing []string) (int, error) {
+	return r.Members.Join(existing)
+}
+
+func (r *Rpc) Shutdown() error {
+	// Cleanup pending calls
+	r.mutex.Lock()
+	pending := r.pending
+	r.pending = make(map[uint64]*Call)
+	r.mutex.Unlock()
+
+	// Force all pending calls to timeout
+	for _, c := range pending {
+		c.Error = Timeout{}
+		c.arrived <- c
+	}
+
+	// Shutdown the node
+	return r.Members.Shutdown()
+}
+
 func (r *Rpc) WhoHas(target Address) (*memberlist.Node, error) {
 	name, found := r.cache.Get(target)
 
+	log.Printf("[DEBUG] routed-rpc: Looking address %+v\n", target)
+
 	if !found {
+		log.Printf("[DEBUG] routed-rpc: Broadcasting who has request for %+v\n", target)
+
 		go r.broadcast(whoHasRequest{
 			Sender:  r.Members.LocalNode().Name,
 			Address: target,
@@ -55,6 +82,8 @@ func (r *Rpc) WhoHas(target Address) (*memberlist.Node, error) {
 			return nil, AddressNotFound{}
 		}
 	}
+
+	log.Printf("[DEBUG] routed-rpc: Found %+v on %s\n", target, name)
 
 	node, found := r.getNode(name)
 
@@ -151,6 +180,8 @@ func (r *Rpc) Call(target Address, args interface{}, reply interface{}) error {
 }
 
 func (r *Rpc) sendMessage(msg *message) error {
+	log.Printf("[DEBUG] routed-rpc: Sending message (xid = %d) to %+v\n", msg.XID, msg.Target)
+
 	node, err := r.WhoHas(msg.Target)
 
 	if err != nil {
@@ -163,7 +194,7 @@ func (r *Rpc) sendMessage(msg *message) error {
 func (r *Rpc) sendRaw(n *memberlist.Node, msg interface{}) error {
 	buff := bytes.NewBuffer([]byte{})
 
-	err := gob.NewEncoder(buff).Encode(msg)
+	err := gob.NewEncoder(buff).Encode(&msg)
 
 	if err != nil {
 		return err
@@ -175,42 +206,59 @@ func (r *Rpc) sendRaw(n *memberlist.Node, msg interface{}) error {
 func (r *Rpc) broadcast(msg interface{}) error {
 	buff := bytes.NewBuffer([]byte{})
 
-	err := gob.NewEncoder(buff).Encode(msg)
+	err := gob.NewEncoder(buff).Encode(&msg)
 
 	if err != nil {
 		return err
 	}
 
 	for _, n := range r.Members.Members() {
+		if n.Name == r.Members.LocalNode().Name {
+			continue
+		}
+
 		r.Members.SendToTCP(n, buff.Bytes())
 	}
 
 	return nil
 }
 
+func (r *Rpc) forwardMessage(msg *message) {
+	if msg.ForwardingCount > r.options.ForwardingLimit {
+		// TODO: Notify
+		return
+	}
+
+	msg.ForwardingCount++
+
+	r.sendMessage(msg)
+}
+
 func (r *Rpc) processMessage(msg *message) {
 	target := msg.Target
 
 	if !r.options.Handler.HasTarget(target) {
-		if msg.ForwardingCount > r.options.ForwardingLimit {
-			// TODO: Notify
-			return
-		}
-
-		msg.ForwardingCount++
-
-		r.sendMessage(msg)
-
+		r.forwardMessage(msg)
 		return
 	}
 
 	switch msg.Type {
 	case castMessage:
-		r.options.Handler.HandleCast(msg.Sender, target, msg.Message)
+		err := r.options.Handler.HandleCast(msg.Sender, target, msg.Message)
+
+		if _, ok := err.(AddressNotFound); ok {
+			r.forwardMessage(msg)
+			return
+		}
 	case callMessage:
 		res, err := r.options.Handler.HandleCall(msg.Sender, target, msg.Message)
 
 		if err != nil {
+			if _, ok := err.(AddressNotFound); ok {
+				r.forwardMessage(msg)
+				return
+			}
+
 			msg.Type = errorMessage
 			msg.Message = marshal(err)
 		} else {
@@ -236,10 +284,12 @@ func (r *Rpc) processMessage(msg *message) {
 		r.mutex.Unlock()
 
 		if found {
+			reply := unmarshal(msg.Message)
+
 			if msg.Type == replyMessage {
-				call.Reply = unmarshal(msg.Message)
+				call.Reply = reply
 			} else {
-				call.Error = unmarshal(msg.Message).(error)
+				call.Error = reply.(error)
 			}
 
 			call.arrived <- call
@@ -253,6 +303,7 @@ func (r *Rpc) processRpcMessage(data []byte) {
 	err := gob.NewDecoder(bytes.NewBuffer(data)).Decode(&msg)
 
 	if err != nil {
+		log.Printf("[DEBUG] routed-rpc: Invalid message: %+v\n", err)
 		return
 	}
 
@@ -263,10 +314,14 @@ func (r *Rpc) processRpcMessage(data []byte) {
 		r.processWhoHasReply(&v)
 	case message:
 		r.processMessage(&v)
+	default:
+		log.Printf("[DEBUG] routed-rpc: Invalid message: %+v\n", v)
 	}
 }
 
 func (r *Rpc) processWhoHasRequest(req *whoHasRequest) {
+	log.Printf("[DEBUG] routed-rpc: Requested advice for %+v\n", req.Address)
+
 	if !r.options.Handler.HasTarget(req.Address) {
 		return
 	}
@@ -277,10 +332,15 @@ func (r *Rpc) processWhoHasRequest(req *whoHasRequest) {
 		return
 	}
 
-	r.sendRaw(sender, whoHasReply{})
+	r.sendRaw(sender, whoHasReply{
+		Who:     r.Members.LocalNode().Name,
+		Address: req.Address,
+	})
 }
 
 func (r *Rpc) processWhoHasReply(reply *whoHasReply) {
+	log.Printf("[DEBUG] routed-rpc: Got advice that %+v is in %s\n", reply.Address, reply.Who)
+
 	r.cache.Add(reply.Address, reply.Who)
 }
 

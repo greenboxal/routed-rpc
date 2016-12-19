@@ -17,7 +17,8 @@ func newCache(size int) *cache {
 	c, _ := lru.NewARC(size)
 
 	return &cache{
-		entries: c,
+		entries:   c,
+		waitSlots: make(map[Address]*list.List),
 	}
 }
 
