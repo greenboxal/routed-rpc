@@ -1,4 +1,4 @@
-# routedrpc
+# routed-rpc
 
 A distributed RPC system which can handle targets who move between nodes.
 
