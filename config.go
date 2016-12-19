@@ -6,14 +6,22 @@ import (
 
 // Config holds the configuration for Rpc
 type Config struct {
+	// Distributed system provider
 	Provider Provider
-	Handler  Handler
 
+	// The handler used
+	Handler Handler
+
+	// How many times a message can be forwarded before being discarded
 	ForwardingLimit int
 
+	// Default call timeout
 	CallTimeout time.Duration
 
-	ArpTimeout   time.Duration
+	// Timeout for waiting ARP responses
+	ArpTimeout time.Duration
+
+	// ARP cache size
 	ArpCacheSize int
 }
 
