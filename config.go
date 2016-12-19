@@ -1,14 +1,12 @@
 package routedrpc
 
 import (
-	"github.com/hashicorp/memberlist"
 	"time"
 )
 
-type Options struct {
-	*memberlist.Config
-
-	Handler Handler
+type Config struct {
+	Provider Provider
+	Handler  Handler
 
 	ForwardingLimit int
 

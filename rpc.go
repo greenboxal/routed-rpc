@@ -1,49 +1,27 @@
 package routedrpc
 
 import (
-	"bytes"
-	"encoding/gob"
 	"log"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/hashicorp/memberlist"
 )
 
 type Rpc struct {
-	Members *memberlist.Memberlist
-
-	cache   *cache
-	options *Options
+	cache  *cache
+	config *Config
 
 	seq     uint64
 	mutex   sync.Mutex
 	pending map[uint64]*Call
 }
 
-func Create(options *Options) (*Rpc, error) {
-	rpc := &Rpc{
-		options: options,
-		cache:   newCache(options.ArpCacheSize),
+func Create(config *Config) *Rpc {
+	return &Rpc{
+		config:  config,
+		cache:   newCache(config.ArpCacheSize),
 		pending: make(map[uint64]*Call),
 	}
-
-	options.Delegate = &memberlistDelegate{rpc}
-
-	members, err := memberlist.Create(options.Config)
-
-	if err != nil {
-		return nil, err
-	}
-
-	rpc.Members = members
-
-	return rpc, nil
-}
-
-func (r *Rpc) Join(existing []string) (int, error) {
-	return r.Members.Join(existing)
 }
 
 func (r *Rpc) Shutdown() error {
@@ -60,10 +38,14 @@ func (r *Rpc) Shutdown() error {
 	}
 
 	// Shutdown the node
-	return r.Members.Shutdown()
+	return r.config.Provider.Shutdown()
 }
 
-func (r *Rpc) WhoHas(target Address) (*memberlist.Node, error) {
+func (r *Rpc) WhoHas(target Address) (Node, error) {
+	if r.config.Handler.HasTarget(target) {
+		return r.config.Provider.Self(), nil
+	}
+
 	name, found := r.cache.Get(target)
 
 	log.Printf("[DEBUG] routed-rpc: Looking address %+v\n", target)
@@ -71,12 +53,12 @@ func (r *Rpc) WhoHas(target Address) (*memberlist.Node, error) {
 	if !found {
 		log.Printf("[DEBUG] routed-rpc: Broadcasting who has request for %+v\n", target)
 
-		go r.broadcast(whoHasRequest{
-			Sender:  r.Members.LocalNode().Name,
+		go r.config.Provider.Broadcast(whoHasRequest{
+			Sender:  r.config.Provider.Self().ID(),
 			Address: target,
 		})
 
-		name, found = r.cache.WaitAndGet(target, r.options.ArpTimeout)
+		name, found = r.cache.WaitAndGet(target, r.config.ArpTimeout)
 
 		if !found {
 			return nil, AddressNotFound{}
@@ -97,7 +79,7 @@ func (r *Rpc) WhoHas(target Address) (*memberlist.Node, error) {
 func (r *Rpc) Cast(target Address, msg interface{}) error {
 	return r.sendMessage(&message{
 		XID:             0,
-		Sender:          r.Members.LocalNode().Name,
+		Sender:          r.config.Provider.Self().ID,
 		Target:          target,
 		ForwardingCount: 0,
 		Type:            castMessage,
@@ -135,7 +117,7 @@ func (r *Rpc) GoWithTimeout(target Address, args interface{}, reply interface{},
 	go func() {
 		err := r.sendMessage(&message{
 			XID:             xid,
-			Sender:          r.Members.LocalNode().Name,
+			Sender:          r.config.Provider.Self().ID,
 			Target:          target,
 			ForwardingCount: 0,
 			Type:            callMessage,
@@ -188,48 +170,22 @@ func (r *Rpc) sendMessage(msg *message) error {
 		return err
 	}
 
-	return r.sendRaw(node, msg)
-}
-
-func (r *Rpc) sendRaw(n *memberlist.Node, msg interface{}) error {
-	buff := bytes.NewBuffer([]byte{})
-
-	err := gob.NewEncoder(buff).Encode(&msg)
-
-	if err != nil {
-		return err
-	}
-
-	return r.Members.SendToTCP(n, buff.Bytes())
-}
-
-func (r *Rpc) broadcast(msg interface{}) error {
-	buff := bytes.NewBuffer([]byte{})
-
-	err := gob.NewEncoder(buff).Encode(&msg)
-
-	if err != nil {
-		return err
-	}
-
-	for _, n := range r.Members.Members() {
-		if n.Name == r.Members.LocalNode().Name {
-			continue
-		}
-
-		r.Members.SendToTCP(n, buff.Bytes())
-	}
-
-	return nil
+	return node.Send(msg)
 }
 
 func (r *Rpc) forwardMessage(msg *message) {
-	if msg.ForwardingCount > r.options.ForwardingLimit {
-		// TODO: Notify
-		return
+	if msg.ForwardingCount > r.config.ForwardingLimit {
+		msg = &message{
+			XID:             msg.XID,
+			Sender:          r.config.Provider.Self().ID,
+			Target:          msg.Sender,
+			ForwardingCount: 0,
+			Type:            errorMessage,
+			Message:         marshal(AddressNotFound{}),
+		}
+	} else {
+		msg.ForwardingCount++
 	}
-
-	msg.ForwardingCount++
 
 	r.sendMessage(msg)
 }
@@ -237,21 +193,24 @@ func (r *Rpc) forwardMessage(msg *message) {
 func (r *Rpc) processMessage(msg *message) {
 	target := msg.Target
 
-	if !r.options.Handler.HasTarget(target) {
+	if !r.config.Handler.HasTarget(target) {
 		r.forwardMessage(msg)
 		return
 	}
 
 	switch msg.Type {
 	case castMessage:
-		err := r.options.Handler.HandleCast(msg.Sender, target, msg.Message)
+		err := r.config.Handler.HandleCast(msg.Sender, target, msg.Message)
 
 		if _, ok := err.(AddressNotFound); ok {
 			r.forwardMessage(msg)
 			return
 		}
 	case callMessage:
-		res, err := r.options.Handler.HandleCall(msg.Sender, target, msg.Message)
+		var typ messageType
+		var reply interface{}
+
+		res, err := r.config.Handler.HandleCall(msg.Sender, target, msg.Message)
 
 		if err != nil {
 			if _, ok := err.(AddressNotFound); ok {
@@ -259,17 +218,21 @@ func (r *Rpc) processMessage(msg *message) {
 				return
 			}
 
-			msg.Type = errorMessage
-			msg.Message = marshal(err)
+			typ = errorMessage
+			reply = err
 		} else {
-			msg.Type = replyMessage
-			msg.Message = marshal(res)
+			typ = replyMessage
+			reply = res
 		}
 
-		msg.Target = msg.Sender
-		msg.Sender = target
-
-		r.sendMessage(msg)
+		r.sendMessage(&message{
+			XID:             msg.XID,
+			Sender:          msg.Target,
+			Target:          msg.Sender,
+			ForwardingCount: 0,
+			Type:            typ,
+			Message:         marshal(reply),
+		})
 	case replyMessage:
 		fallthrough
 	case errorMessage:
@@ -297,16 +260,7 @@ func (r *Rpc) processMessage(msg *message) {
 	}
 }
 
-func (r *Rpc) processRpcMessage(data []byte) {
-	var msg interface{}
-
-	err := gob.NewDecoder(bytes.NewBuffer(data)).Decode(&msg)
-
-	if err != nil {
-		log.Printf("[DEBUG] routed-rpc: Invalid message: %+v\n", err)
-		return
-	}
-
+func (r *Rpc) ProcessRpcMessage(msg interface{}) {
 	switch v := msg.(type) {
 	case whoHasRequest:
 		r.processWhoHasRequest(&v)
@@ -315,14 +269,14 @@ func (r *Rpc) processRpcMessage(data []byte) {
 	case message:
 		r.processMessage(&v)
 	default:
-		log.Printf("[DEBUG] routed-rpc: Invalid message: %+v\n", v)
+		log.Printf("[ERROR] routed-rpc: Invalid message: %+v\n", v)
 	}
 }
 
 func (r *Rpc) processWhoHasRequest(req *whoHasRequest) {
 	log.Printf("[DEBUG] routed-rpc: Requested advice for %+v\n", req.Address)
 
-	if !r.options.Handler.HasTarget(req.Address) {
+	if !r.config.Handler.HasTarget(req.Address) {
 		return
 	}
 
@@ -332,8 +286,7 @@ func (r *Rpc) processWhoHasRequest(req *whoHasRequest) {
 		return
 	}
 
-	r.sendRaw(sender, whoHasReply{
-		Who:     r.Members.LocalNode().Name,
+	sender.Send(whoHasReply{
 		Address: req.Address,
 	})
 }
@@ -344,9 +297,9 @@ func (r *Rpc) processWhoHasReply(reply *whoHasReply) {
 	r.cache.Add(reply.Address, reply.Who)
 }
 
-func (r *Rpc) getNode(name string) (*memberlist.Node, bool) {
-	for _, n := range r.Members.Members() {
-		if n.Name == name {
+func (r *Rpc) getNode(id uint64) (Node, bool) {
+	for _, n := range r.config.Provider.Members() {
+		if n.ID() == id {
 			return n, true
 		}
 	}

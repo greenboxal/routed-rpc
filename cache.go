@@ -22,7 +22,7 @@ func newCache(size int) *cache {
 	}
 }
 
-func (c *cache) Add(addr Address, name string) {
+func (c *cache) Add(addr Address, name uint64) {
 	c.mutex.Lock()
 
 	c.entries.Add(addr, name)
@@ -38,7 +38,7 @@ func (c *cache) Add(addr Address, name string) {
 		e := slot.Front()
 
 		for e != nil {
-			ch := e.Value.(chan string)
+			ch := e.Value.(chan uint64)
 
 			ch <- name
 
@@ -47,20 +47,20 @@ func (c *cache) Add(addr Address, name string) {
 	}
 }
 
-func (c *cache) Get(addr Address) (string, bool) {
+func (c *cache) Get(addr Address) (uint64, bool) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
 	value, found := c.entries.Get(addr)
 
 	if !found {
-		return "", false
+		return 0, false
 	}
 
-	return value.(string), true
+	return value.(uint64), true
 }
 
-func (c *cache) WaitAndGet(addr Address, timeout time.Duration) (string, bool) {
+func (c *cache) WaitAndGet(addr Address, timeout time.Duration) (uint64, bool) {
 	c.mutex.Lock()
 
 	value, found := c.entries.Get(addr)
@@ -68,10 +68,10 @@ func (c *cache) WaitAndGet(addr Address, timeout time.Duration) (string, bool) {
 	if found {
 		c.mutex.Unlock()
 
-		return value.(string), true
+		return value.(uint64), true
 	}
 
-	ch := make(chan string)
+	ch := make(chan uint64)
 
 	slot, found := c.waitSlots[addr]
 
@@ -91,7 +91,7 @@ func (c *cache) WaitAndGet(addr Address, timeout time.Duration) (string, bool) {
 		value = v
 		found = true
 	case <-time.After(timeout):
-		value = ""
+		value = 0
 		found = false
 	}
 
@@ -104,5 +104,5 @@ func (c *cache) WaitAndGet(addr Address, timeout time.Duration) (string, bool) {
 	}
 	c.mutex.Unlock()
 
-	return value.(string), found
+	return value.(uint64), found
 }
