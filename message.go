@@ -16,11 +16,12 @@ const (
 
 type message struct {
 	XID             uint64
+	SenderID        interface{}
 	Sender          Address
 	Target          Address
 	ForwardingCount int
 	Type            messageType
-	Message         []byte
+	Message         interface{}
 }
 
 func init() {

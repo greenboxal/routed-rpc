@@ -22,7 +22,7 @@ func newCache(size int) *cache {
 	}
 }
 
-func (c *cache) Add(addr Address, name uint64) {
+func (c *cache) Add(addr Address, name interface{}) {
 	c.mutex.Lock()
 
 	c.entries.Add(addr, name)
@@ -38,7 +38,7 @@ func (c *cache) Add(addr Address, name uint64) {
 		e := slot.Front()
 
 		for e != nil {
-			ch := e.Value.(chan uint64)
+			ch := e.Value.(chan interface{})
 
 			ch <- name
 
@@ -47,20 +47,20 @@ func (c *cache) Add(addr Address, name uint64) {
 	}
 }
 
-func (c *cache) Get(addr Address) (uint64, bool) {
+func (c *cache) Get(addr Address) (interface{}, bool) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
 	value, found := c.entries.Get(addr)
 
 	if !found {
-		return 0, false
+		return nil, false
 	}
 
-	return value.(uint64), true
+	return value.(interface{}), true
 }
 
-func (c *cache) WaitAndGet(addr Address, timeout time.Duration) (uint64, bool) {
+func (c *cache) WaitAndGet(addr Address, timeout time.Duration) (interface{}, bool) {
 	c.mutex.Lock()
 
 	value, found := c.entries.Get(addr)
@@ -68,10 +68,10 @@ func (c *cache) WaitAndGet(addr Address, timeout time.Duration) (uint64, bool) {
 	if found {
 		c.mutex.Unlock()
 
-		return value.(uint64), true
+		return value.(interface{}), true
 	}
 
-	ch := make(chan uint64)
+	ch := make(chan interface{})
 
 	slot, found := c.waitSlots[addr]
 
@@ -91,7 +91,7 @@ func (c *cache) WaitAndGet(addr Address, timeout time.Duration) (uint64, bool) {
 		value = v
 		found = true
 	case <-time.After(timeout):
-		value = 0
+		value = nil
 		found = false
 	}
 
@@ -104,5 +104,9 @@ func (c *cache) WaitAndGet(addr Address, timeout time.Duration) (uint64, bool) {
 	}
 	c.mutex.Unlock()
 
-	return value.(uint64), found
+	if !found {
+		return nil, found
+	}
+
+	return value.(interface{}), true
 }

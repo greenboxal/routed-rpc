@@ -2,6 +2,7 @@ package routedrpc
 
 import (
 	"log"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -17,11 +18,16 @@ type Rpc struct {
 }
 
 func Create(config *Config) *Rpc {
-	return &Rpc{
+	rpc := &Rpc{
 		config:  config,
 		cache:   newCache(config.ArpCacheSize),
 		pending: make(map[uint64]*Call),
+		seq:     1,
 	}
+
+	config.Provider.SetRpc(rpc)
+
+	return rpc
 }
 
 func (r *Rpc) Shutdown() error {
@@ -79,11 +85,12 @@ func (r *Rpc) WhoHas(target Address) (Node, error) {
 func (r *Rpc) Cast(target Address, msg interface{}) error {
 	return r.sendMessage(&message{
 		XID:             0,
-		Sender:          r.config.Provider.Self().ID,
+		SenderID:        r.config.Provider.Self().ID(),
+		Sender:          nil,
 		Target:          target,
 		ForwardingCount: 0,
 		Type:            castMessage,
-		Message:         marshal(msg),
+		Message:         msg,
 	})
 }
 
@@ -103,12 +110,15 @@ func (r *Rpc) GoWithTimeout(target Address, args interface{}, reply interface{},
 		}
 	}
 
+	replyValue := reflect.ValueOf(reply)
+
+	if replyValue.Kind() == reflect.Ptr {
+		replyValue = replyValue.Elem()
+	}
+
 	call := &Call{
 		arrived: make(chan *Call, 1),
-
-		Args:  args,
-		Reply: reply,
-		Done:  done,
+		Done:    done,
 	}
 
 	xid := atomic.AddUint64(&r.seq, 1)
@@ -117,11 +127,12 @@ func (r *Rpc) GoWithTimeout(target Address, args interface{}, reply interface{},
 	go func() {
 		err := r.sendMessage(&message{
 			XID:             xid,
-			Sender:          r.config.Provider.Self().ID,
+			SenderID:        r.config.Provider.Self().ID(),
+			Sender:          nil,
 			Target:          target,
 			ForwardingCount: 0,
 			Type:            callMessage,
-			Message:         marshal(args),
+			Message:         args,
 		})
 
 		if err != nil {
@@ -129,7 +140,7 @@ func (r *Rpc) GoWithTimeout(target Address, args interface{}, reply interface{},
 		} else {
 			select {
 			case <-call.arrived:
-				// Handle normally
+				replyValue.Set(reflect.ValueOf(call.Reply))
 			case <-time.After(timeout):
 				call.Error = Timeout{}
 			}
@@ -146,7 +157,7 @@ func (r *Rpc) GoWithTimeout(target Address, args interface{}, reply interface{},
 }
 
 func (r *Rpc) Go(target Address, args interface{}, reply interface{}, done chan *Call) *Call {
-	return r.GoWithTimeout(target, args, reply, done, 10*time.Second)
+	return r.GoWithTimeout(target, args, reply, done, r.config.CallTimeout)
 }
 
 func (r *Rpc) CallWithTimeout(target Address, args interface{}, reply interface{}, timeout time.Duration) error {
@@ -156,9 +167,7 @@ func (r *Rpc) CallWithTimeout(target Address, args interface{}, reply interface{
 }
 
 func (r *Rpc) Call(target Address, args interface{}, reply interface{}) error {
-	call := <-r.Go(target, args, reply, make(chan *Call, 1)).Done
-
-	return call.Error
+	return r.CallWithTimeout(target, args, reply, r.config.CallTimeout)
 }
 
 func (r *Rpc) sendMessage(msg *message) error {
@@ -177,11 +186,12 @@ func (r *Rpc) forwardMessage(msg *message) {
 	if msg.ForwardingCount > r.config.ForwardingLimit {
 		msg = &message{
 			XID:             msg.XID,
-			Sender:          r.config.Provider.Self().ID,
-			Target:          msg.Sender,
+			Sender:          msg.Sender,
+			SenderID:        msg.SenderID,
+			Target:          msg.Target,
 			ForwardingCount: 0,
 			Type:            errorMessage,
-			Message:         marshal(AddressNotFound{}),
+			Message:         AddressNotFound{},
 		}
 	} else {
 		msg.ForwardingCount++
@@ -193,9 +203,11 @@ func (r *Rpc) forwardMessage(msg *message) {
 func (r *Rpc) processMessage(msg *message) {
 	target := msg.Target
 
-	if !r.config.Handler.HasTarget(target) {
-		r.forwardMessage(msg)
-		return
+	if msg.Type == castMessage || msg.Type == callMessage {
+		if !r.config.Handler.HasTarget(target) {
+			r.forwardMessage(msg)
+			return
+		}
 	}
 
 	switch msg.Type {
@@ -225,13 +237,20 @@ func (r *Rpc) processMessage(msg *message) {
 			reply = res
 		}
 
-		r.sendMessage(&message{
+		node, found := r.getNode(msg.SenderID)
+
+		if !found {
+			return
+		}
+
+		node.Send(&message{
 			XID:             msg.XID,
-			Sender:          msg.Target,
-			Target:          msg.Sender,
+			Sender:          nil,
+			SenderID:        r.config.Provider.Self().ID(),
+			Target:          nil,
 			ForwardingCount: 0,
 			Type:            typ,
-			Message:         marshal(reply),
+			Message:         reply,
 		})
 	case replyMessage:
 		fallthrough
@@ -247,12 +266,10 @@ func (r *Rpc) processMessage(msg *message) {
 		r.mutex.Unlock()
 
 		if found {
-			reply := unmarshal(msg.Message)
-
 			if msg.Type == replyMessage {
-				call.Reply = reply
+				call.Reply = msg.Message
 			} else {
-				call.Error = reply.(error)
+				call.Error = msg.Message.(error)
 			}
 
 			call.arrived <- call
@@ -262,12 +279,21 @@ func (r *Rpc) processMessage(msg *message) {
 
 func (r *Rpc) ProcessRpcMessage(msg interface{}) {
 	switch v := msg.(type) {
+	case *whoHasRequest:
+		r.processWhoHasRequest(v)
 	case whoHasRequest:
 		r.processWhoHasRequest(&v)
+
+	case *whoHasReply:
+		r.processWhoHasReply(v)
 	case whoHasReply:
 		r.processWhoHasReply(&v)
+
+	case *message:
+		r.processMessage(v)
 	case message:
 		r.processMessage(&v)
+
 	default:
 		log.Printf("[ERROR] routed-rpc: Invalid message: %+v\n", v)
 	}
@@ -287,6 +313,7 @@ func (r *Rpc) processWhoHasRequest(req *whoHasRequest) {
 	}
 
 	sender.Send(whoHasReply{
+		Who:     r.config.Provider.Self().ID(),
 		Address: req.Address,
 	})
 }
@@ -297,7 +324,7 @@ func (r *Rpc) processWhoHasReply(reply *whoHasReply) {
 	r.cache.Add(reply.Address, reply.Who)
 }
 
-func (r *Rpc) getNode(id uint64) (Node, bool) {
+func (r *Rpc) getNode(id interface{}) (Node, bool) {
 	for _, n := range r.config.Provider.Members() {
 		if n.ID() == id {
 			return n, true

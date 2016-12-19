@@ -10,6 +10,19 @@ type Config struct {
 
 	ForwardingLimit int
 
+	CallTimeout time.Duration
+
 	ArpTimeout   time.Duration
 	ArpCacheSize int
+}
+
+func DefaultConfig() *Config {
+	return &Config{
+		Provider:        nil,
+		Handler:         NewStandardHandler(),
+		ForwardingLimit: 5,
+		CallTimeout:     2 * time.Second,
+		ArpTimeout:      1 * time.Second,
+		ArpCacheSize:    1000000,
+	}
 }

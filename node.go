@@ -1,6 +1,6 @@
 package routedrpc
 
 type Node interface {
-	ID() uint64
-	Send(data interface{}) error
+	ID() interface{}
+	Send(msg interface{}) error
 }

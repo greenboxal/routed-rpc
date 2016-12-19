@@ -1,11 +1,11 @@
 package routedrpc
 
 type whoHasRequest struct {
-	Sender  uint64
+	Sender  interface{}
 	Address Address
 }
 
 type whoHasReply struct {
-	Who     uint64
+	Who     interface{}
 	Address Address
 }
