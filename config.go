@@ -4,6 +4,7 @@ import (
 	"time"
 )
 
+// Config holds the configuration for Rpc
 type Config struct {
 	Provider Provider
 	Handler  Handler
@@ -16,6 +17,7 @@ type Config struct {
 	ArpCacheSize int
 }
 
+// DefaultConfig returns sane config defaults
 func DefaultConfig() *Config {
 	return &Config{
 		Provider:        nil,

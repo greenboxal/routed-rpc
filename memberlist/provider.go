@@ -8,7 +8,7 @@ import (
 type Memberlist struct {
 	*mb.Memberlist
 
-	rpc *routedrpc.Rpc
+	rpc *routedrpc.RPC
 }
 
 func Create(config *mb.Config) (*Memberlist, error) {
@@ -56,7 +56,7 @@ func (m *Memberlist) Broadcast(msg interface{}) error {
 	return err
 }
 
-func (m *Memberlist) SetRpc(rpc *routedrpc.Rpc) {
+func (m *Memberlist) SetRpc(rpc *routedrpc.RPC) {
 	m.rpc = rpc
 }
 
@@ -71,7 +71,7 @@ func (m *Memberlist) NotifyMsg(data []byte) {
 		return
 	}
 
-	m.rpc.ProcessRpcMessage(msg)
+	m.rpc.ProcessRPCMessage(msg)
 }
 
 func (m *Memberlist) GetBroadcasts(overhead, limit int) [][]byte {

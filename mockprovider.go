@@ -7,7 +7,7 @@ type MockHub struct {
 type MockProvider struct {
 	id  int
 	hub *MockHub
-	rpc *Rpc
+	rpc *RPC
 }
 
 func NewMockHub() *MockHub {
@@ -64,12 +64,12 @@ func (m *MockProvider) Broadcast(msg interface{}) error {
 	return nil
 }
 
-func (m *MockProvider) SetRpc(rpc *Rpc) {
+func (m *MockProvider) SetRpc(rpc *RPC) {
 	m.rpc = rpc
 }
 
 func (m *MockProvider) Send(msg interface{}) error {
-	go m.rpc.ProcessRpcMessage(msg)
+	go m.rpc.ProcessRPCMessage(msg)
 
 	return nil
 }

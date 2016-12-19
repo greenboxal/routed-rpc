@@ -1,9 +1,10 @@
 package routedrpc
 
+// A Call represnts a pending responde from the RPC system
 type Call struct {
 	arrived chan *Call
 
-	Done  chan *Call
-	Reply interface{}
-	Error error
+	Done  chan *Call  // Signaled when call is complete.
+	Reply interface{} // Responde message.
+	Error error       // After completion, the error status.
 }

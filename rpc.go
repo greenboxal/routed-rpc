@@ -8,7 +8,8 @@ import (
 	"time"
 )
 
-type Rpc struct {
+// RPC holds state for the current node in the system
+type RPC struct {
 	cache  *cache
 	config *Config
 
@@ -17,8 +18,9 @@ type Rpc struct {
 	pending map[uint64]*Call
 }
 
-func Create(config *Config) *Rpc {
-	rpc := &Rpc{
+// Create a Rpc instance
+func Create(config *Config) *RPC {
+	rpc := &RPC{
 		config:  config,
 		cache:   newCache(config.ArpCacheSize),
 		pending: make(map[uint64]*Call),
@@ -30,7 +32,8 @@ func Create(config *Config) *Rpc {
 	return rpc
 }
 
-func (r *Rpc) Shutdown() error {
+// Shutdown stops this node operations
+func (r *RPC) Shutdown() error {
 	// Cleanup pending calls
 	r.mutex.Lock()
 	pending := r.pending
@@ -47,7 +50,10 @@ func (r *Rpc) Shutdown() error {
 	return r.config.Provider.Shutdown()
 }
 
-func (r *Rpc) WhoHas(target Address) (Node, error) {
+// WhoHas Returns which node is responsible for handling the provided address
+//
+// This information is retried either from the ARP cache or asked to the network
+func (r *RPC) WhoHas(target Address) (Node, error) {
 	if r.config.Handler.HasTarget(target) {
 		return r.config.Provider.Self(), nil
 	}
@@ -82,7 +88,8 @@ func (r *Rpc) WhoHas(target Address) (Node, error) {
 	return node, nil
 }
 
-func (r *Rpc) Cast(target Address, msg interface{}) error {
+// Cast sends a RPC call without waiting for a response (fire and forget)
+func (r *RPC) Cast(target Address, msg interface{}) error {
 	return r.sendMessage(&message{
 		XID:             0,
 		SenderID:        r.config.Provider.Self().ID(),
@@ -94,7 +101,8 @@ func (r *Rpc) Cast(target Address, msg interface{}) error {
 	})
 }
 
-func (r *Rpc) GoWithTimeout(target Address, args interface{}, reply interface{}, done chan *Call, timeout time.Duration) *Call {
+// GoWithTimeout Sends a RPC call to _target_
+func (r *RPC) GoWithTimeout(target Address, args interface{}, reply interface{}, done chan *Call, timeout time.Duration) *Call {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -156,21 +164,24 @@ func (r *Rpc) GoWithTimeout(target Address, args interface{}, reply interface{},
 	return call
 }
 
-func (r *Rpc) Go(target Address, args interface{}, reply interface{}, done chan *Call) *Call {
+// Go sends a RPC call to _target_
+func (r *RPC) Go(target Address, args interface{}, reply interface{}, done chan *Call) *Call {
 	return r.GoWithTimeout(target, args, reply, done, r.config.CallTimeout)
 }
 
-func (r *Rpc) CallWithTimeout(target Address, args interface{}, reply interface{}, timeout time.Duration) error {
+// CallWithTimeout sends a RPC call to _target_
+func (r *RPC) CallWithTimeout(target Address, args interface{}, reply interface{}, timeout time.Duration) error {
 	call := <-r.GoWithTimeout(target, args, reply, make(chan *Call, 1), timeout).Done
 
 	return call.Error
 }
 
-func (r *Rpc) Call(target Address, args interface{}, reply interface{}) error {
+// Call sends a RPC call to _target_
+func (r *RPC) Call(target Address, args interface{}, reply interface{}) error {
 	return r.CallWithTimeout(target, args, reply, r.config.CallTimeout)
 }
 
-func (r *Rpc) sendMessage(msg *message) error {
+func (r *RPC) sendMessage(msg *message) error {
 	log.Printf("[DEBUG] routed-rpc: Sending message (xid = %d) to %+v\n", msg.XID, msg.Target)
 
 	node, err := r.WhoHas(msg.Target)
@@ -182,7 +193,7 @@ func (r *Rpc) sendMessage(msg *message) error {
 	return node.Send(msg)
 }
 
-func (r *Rpc) forwardMessage(msg *message) {
+func (r *RPC) forwardMessage(msg *message) {
 	if msg.ForwardingCount > r.config.ForwardingLimit {
 		msg = &message{
 			XID:             msg.XID,
@@ -200,7 +211,7 @@ func (r *Rpc) forwardMessage(msg *message) {
 	r.sendMessage(msg)
 }
 
-func (r *Rpc) processMessage(msg *message) {
+func (r *RPC) processMessage(msg *message) {
 	target := msg.Target
 
 	if msg.Type == castMessage || msg.Type == callMessage {
@@ -277,7 +288,8 @@ func (r *Rpc) processMessage(msg *message) {
 	}
 }
 
-func (r *Rpc) ProcessRpcMessage(msg interface{}) {
+// ProcessRPCMessage should be called by the Provider implementation in order to forward system messages
+func (r *RPC) ProcessRPCMessage(msg interface{}) {
 	switch v := msg.(type) {
 	case *whoHasRequest:
 		r.processWhoHasRequest(v)
@@ -299,7 +311,7 @@ func (r *Rpc) ProcessRpcMessage(msg interface{}) {
 	}
 }
 
-func (r *Rpc) processWhoHasRequest(req *whoHasRequest) {
+func (r *RPC) processWhoHasRequest(req *whoHasRequest) {
 	log.Printf("[DEBUG] routed-rpc: Requested advice for %+v\n", req.Address)
 
 	if !r.config.Handler.HasTarget(req.Address) {
@@ -318,13 +330,13 @@ func (r *Rpc) processWhoHasRequest(req *whoHasRequest) {
 	})
 }
 
-func (r *Rpc) processWhoHasReply(reply *whoHasReply) {
+func (r *RPC) processWhoHasReply(reply *whoHasReply) {
 	log.Printf("[DEBUG] routed-rpc: Got advice that %+v is in %s\n", reply.Address, reply.Who)
 
 	r.cache.Add(reply.Address, reply.Who)
 }
 
-func (r *Rpc) getNode(id interface{}) (Node, bool) {
+func (r *RPC) getNode(id interface{}) (Node, bool) {
 	for _, n := range r.config.Provider.Members() {
 		if n.ID() == id {
 			return n, true
