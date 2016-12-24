@@ -25,6 +25,10 @@ func Create(config *Config) (*Provider, error) {
 		config:  config,
 	}
 
+	if err := provider.sanitizeConfig(); err != nil {
+		return nil, err
+	}
+
 	if err := provider.initializeRPCServer(); err != nil {
 		return nil, err
 	}
@@ -40,6 +44,56 @@ func Create(config *Config) (*Provider, error) {
 	provider.members[local.Name] = provider.local
 
 	return provider, nil
+}
+
+func (m *Provider) sanitizeConfig() error {
+	c := mb.DefaultLANConfig()
+
+	whispBind, err := net.ResolveTCPAddr("tcp", m.config.WhispBindEndpoint)
+
+	if err != nil {
+		return err
+	}
+
+	whispAdvertise, err := net.ResolveTCPAddr("tcp", m.config.WhispAdvertiseEndpoint)
+
+	if err != nil {
+		return err
+	}
+
+	rpcBind, err := net.ResolveTCPAddr("tcp", m.config.WhispBindEndpoint)
+
+	if err != nil {
+		return err
+	}
+
+	rpcAdvertise, err := net.ResolveTCPAddr("tcp", m.config.WhispAdvertiseEndpoint)
+
+	if err != nil {
+		return err
+	}
+
+	if whispBind.IP == nil {
+		whispBind.IP = net.ParseIP("0.0.0.0")
+		m.config.WhispBindEndpoint = whispBind.String()
+	}
+
+	if rpcBind.IP == nil {
+		rpcBind.IP = net.ParseIP("0.0.0.0")
+		m.config.RPCBindEndpoint = rpcBind.String()
+	}
+
+	if whispAdvertise.IP == nil {
+		whispAdvertise.IP = firstPublicAddress()
+		m.config.WhispAdvertiseEndpoint = whispAdvertise.String()
+	}
+
+	if rpcAdvertise.IP == nil {
+		rpcAdvertise.IP = firstPublicAddress()
+		m.config.RPCAdvertiseEndpoint = rpcAdvertise.String()
+	}
+
+	return nil
 }
 
 func (m *Provider) initializeRPCServer() error {
@@ -209,4 +263,37 @@ func (m *Provider) handleConnection(conn net.Conn) {
 
 		m.rpc.ProcessRPCMessage(msg)
 	}
+}
+
+func firstPublicAddress() net.IP {
+	addresses, err := net.InterfaceAddrs()
+
+	if err != nil {
+		return nil
+	}
+
+	for _, rawAddr := range addresses {
+		var ip net.IP
+
+		switch addr := rawAddr.(type) {
+		case *net.IPAddr:
+			ip = addr.IP
+		case *net.IPNet:
+			ip = addr.IP
+		default:
+			continue
+		}
+
+		if ip.To4() == nil {
+			continue
+		}
+
+		if !mb.IsPrivateIP(ip.String()) {
+			continue
+		}
+
+		return ip
+	}
+
+	return nil
 }
