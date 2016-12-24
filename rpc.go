@@ -1,12 +1,12 @@
 package routedrpc
 
 import (
-	"io/ioutil"
-	"log"
 	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/Sirupsen/logrus"
 )
 
 // RPC holds state for the current node in the system
@@ -29,7 +29,7 @@ func Create(config *Config) *RPC {
 	}
 
 	if config.Log == nil {
-		config.Log = log.New(ioutil.Discard, "", 0)
+		config.Log = logrus.WithField("component", "routedrpc")
 	}
 
 	config.Provider.SetRPC(rpc)
@@ -203,8 +203,6 @@ func (r *RPC) sendMessage(msg *message) error {
 		return err
 	}
 
-	r.config.Log.Printf("sending message to %v\n", node.ID())
-
 	return node.Send(msg)
 }
 
@@ -219,6 +217,13 @@ func (r *RPC) forwardMessage(msg *message) {
 			Type:            errorMessage,
 			Message:         AddressNotFound{},
 		}
+
+		r.config.Log.WithFields(logrus.Fields{
+			"xid":      msg.XID,
+			"sender":   msg.Sender,
+			"senderid": msg.SenderID,
+			"target":   msg.Target,
+		}).Warn("forwarding limit exceeded")
 	} else {
 		msg.ForwardingCount++
 	}
@@ -333,6 +338,7 @@ func (r *RPC) processWhoHasRequest(req *whoHasRequest) {
 	sender, found := r.config.Provider.GetMember(req.Sender)
 
 	if !found {
+		r.config.Log.WithField("sender", req.Sender).Warn("sender not found when replying to whohas")
 		return
 	}
 
@@ -347,16 +353,17 @@ func (r *RPC) processWhoHasReply(reply *whoHasReply) {
 	member, found := r.config.Provider.GetMember(reply.Who)
 
 	if !found {
-		r.config.Log.Printf("error adding %v to cache: %v doesn't exist\n", reply.Address, reply.Who)
+		r.config.Log.WithField("who", reply.Who).Warn("memer not found when parsing whohas reply")
 		return
 	}
 
 	err := r.cache.Add(reply.Address, member, reply.Multiple)
 
 	if err != nil {
-		r.config.Log.Printf("error adding %v on %v to cache: %s\n", reply.Address, member.ID(), err.Error())
-		return
+		r.config.Log.WithError(err).WithFields(logrus.Fields{
+			"who":      reply.Who,
+			"address":  reply.Address,
+			"multiple": reply.Multiple,
+		}).Error("error adding whohas reply to cache")
 	}
-
-	r.config.Log.Printf("adding %v on %v (ha = %v)", reply.Address, member.ID(), reply.Multiple)
 }

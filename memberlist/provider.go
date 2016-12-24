@@ -2,9 +2,11 @@ package memberlist
 
 import (
 	"encoding/gob"
+	"io/ioutil"
 	"net"
 	"sync"
 
+	"github.com/Sirupsen/logrus"
 	"github.com/greenboxal/routed-rpc"
 	mb "github.com/hashicorp/memberlist"
 )
@@ -23,6 +25,10 @@ func Create(config *Config) (*Provider, error) {
 	provider := &Provider{
 		members: make(map[string]*node),
 		config:  config,
+	}
+
+	if config.Log == nil {
+		config.Log = logrus.WithField("component", "memberlist")
 	}
 
 	if err := provider.sanitizeConfig(); err != nil {
@@ -130,6 +136,7 @@ func (m *Provider) initializeMemberlist() error {
 	c.AdvertisePort = advertise.Port
 	c.Delegate = &delegate{m}
 	c.Events = &delegate{m}
+	c.LogOutput = ioutil.Discard
 
 	mb, err := mb.Create(c)
 
@@ -213,11 +220,14 @@ func (m *Provider) removeNode(n *mb.Node) {
 	item, found := m.members[n.Name]
 
 	if !found {
+		m.config.Log.WithField("member", n.Name).Error("removing non existent member")
 		return
 	}
 
 	item.offline = true
 	delete(m.members, n.Name)
+
+	m.config.Log.WithField("member", n.Name).Info("member left")
 }
 
 func (m *Provider) updateNode(n *mb.Node) {
@@ -232,6 +242,8 @@ func (m *Provider) updateNode(n *mb.Node) {
 	}
 
 	item.update(n)
+
+	m.config.Log.WithField("member", n.Name).Info("member joined")
 }
 
 func (m *Provider) handleListener() {
@@ -239,6 +251,7 @@ func (m *Provider) handleListener() {
 		conn, err := m.listener.Accept()
 
 		if err != nil {
+			m.config.Log.WithError(err).Error("error accepting client")
 			return
 		}
 
@@ -256,6 +269,7 @@ func (m *Provider) handleConnection(conn net.Conn) {
 
 		if err != nil {
 			conn.Close()
+			m.config.Log.WithError(err).Error("error reading from client")
 			break
 		}
 
@@ -283,6 +297,10 @@ func firstPublicAddress() net.IP {
 		}
 
 		if ip.To4() == nil {
+			continue
+		}
+
+		if ip.IsLoopback() {
 			continue
 		}
 

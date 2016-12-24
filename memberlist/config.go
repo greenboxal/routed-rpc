@@ -1,5 +1,7 @@
 package memberlist
 
+import "github.com/Sirupsen/logrus"
+
 type Config struct {
 	// Node name
 	Name string
@@ -15,4 +17,7 @@ type Config struct {
 
 	// Endpoint to advertise the RPC service to other peers
 	RPCAdvertiseEndpoint string
+
+	// Logger
+	Log *logrus.Entry
 }

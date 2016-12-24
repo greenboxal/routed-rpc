@@ -1,8 +1,9 @@
 package routedrpc
 
 import (
-	"log"
 	"time"
+
+	"github.com/Sirupsen/logrus"
 )
 
 // Config holds the configuration for Rpc
@@ -26,7 +27,7 @@ type Config struct {
 	ArpCacheSize int
 
 	// Logger
-	Log *log.Logger
+	Log *logrus.Entry
 }
 
 // DefaultConfig returns sane config defaults
