@@ -82,11 +82,11 @@ func (r *RPC) WhoHas(target Address) (Node, error) {
 }
 
 // Cast sends a RPC call without waiting for a response (fire and forget)
-func (r *RPC) Cast(target Address, msg interface{}) error {
+func (r *RPC) Cast(sender, target Address, msg interface{}) error {
 	return r.sendMessage(&message{
 		XID:             0,
 		SenderID:        r.config.Provider.Self().ID(),
-		Sender:          nil,
+		Sender:          sender,
 		Target:          target,
 		ForwardingCount: 0,
 		Type:            castMessage,
@@ -95,7 +95,7 @@ func (r *RPC) Cast(target Address, msg interface{}) error {
 }
 
 // GoWithTimeout Sends a RPC call to _target_
-func (r *RPC) GoWithTimeout(target Address, args interface{}, reply interface{}, done chan *Call, timeout time.Duration) *Call {
+func (r *RPC) GoWithTimeout(sender, target Address, args interface{}, reply interface{}, done chan *Call, timeout time.Duration) *Call {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -129,7 +129,7 @@ func (r *RPC) GoWithTimeout(target Address, args interface{}, reply interface{},
 		err := r.sendMessage(&message{
 			XID:             xid,
 			SenderID:        r.config.Provider.Self().ID(),
-			Sender:          nil,
+			Sender:          sender,
 			Target:          target,
 			ForwardingCount: 0,
 			Type:            callMessage,
@@ -158,20 +158,20 @@ func (r *RPC) GoWithTimeout(target Address, args interface{}, reply interface{},
 }
 
 // Go sends a RPC call to _target_
-func (r *RPC) Go(target Address, args interface{}, reply interface{}, done chan *Call) *Call {
-	return r.GoWithTimeout(target, args, reply, done, r.config.CallTimeout)
+func (r *RPC) Go(sender, target Address, args interface{}, reply interface{}, done chan *Call) *Call {
+	return r.GoWithTimeout(sender, target, args, reply, done, r.config.CallTimeout)
 }
 
 // CallWithTimeout sends a RPC call to _target_
-func (r *RPC) CallWithTimeout(target Address, args interface{}, reply interface{}, timeout time.Duration) error {
-	call := <-r.GoWithTimeout(target, args, reply, make(chan *Call, 1), timeout).Done
+func (r *RPC) CallWithTimeout(sender, target Address, args interface{}, reply interface{}, timeout time.Duration) error {
+	call := <-r.GoWithTimeout(sender, target, args, reply, make(chan *Call, 1), timeout).Done
 
 	return call.Error
 }
 
 // Call sends a RPC call to _target_
-func (r *RPC) Call(target Address, args interface{}, reply interface{}) error {
-	return r.CallWithTimeout(target, args, reply, r.config.CallTimeout)
+func (r *RPC) Call(sender, target Address, args interface{}, reply interface{}) error {
+	return r.CallWithTimeout(sender, target, args, reply, r.config.CallTimeout)
 }
 
 func (r *RPC) sendMessage(msg *message) error {

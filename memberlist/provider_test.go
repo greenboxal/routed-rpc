@@ -55,10 +55,10 @@ func TestProvider(t *testing.T) {
 	assert.NotNil(t, rpcB)
 
 	ret := ""
-	err = rpcA.Call("player_b", "parameter", &ret)
+	err = rpcA.Call("pepe", "player_b", "parameter", &ret)
 	assert.Nil(t, err)
 	assert.Equal(t, ret, "player_b")
-	assert.Equal(t, handlerB.LastCallSender, nil)
+	assert.Equal(t, handlerB.LastCallSender, "pepe")
 	assert.Equal(t, handlerB.LastCallTarget, "player_b")
 	assert.Equal(t, handlerB.LastCallMessage, "parameter")
 }
