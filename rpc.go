@@ -66,10 +66,14 @@ func (r *RPC) WhoHas(target Address) (Node, error) {
 	node, found := r.cache.Get(target)
 
 	if !found {
-		go r.config.Provider.Broadcast(whoHasRequest{
+		err := r.config.Provider.Broadcast(whoHasRequest{
 			Sender:  r.config.Provider.Self().ID(),
 			Address: target,
 		})
+
+		if err != nil {
+			return nil, err
+		}
 
 		node, found = r.cache.WaitAndGet(target, r.config.ArpTimeout)
 
@@ -79,6 +83,24 @@ func (r *RPC) WhoHas(target Address) (Node, error) {
 	}
 
 	return node, nil
+}
+
+// Advertise pushes the information that this node can handle an address
+//
+// This useful on HA addresses when starting a new node, forcing the others
+// to acknowledge the new handler before their ARP cache expires
+func (r *RPC) Advertise(address Address) error {
+	ok, ha := r.config.Handler.HasTarget(address)
+
+	if !ok {
+		return AddressNotFound{}
+	}
+
+	return r.config.Provider.Broadcast(whoHasReply{
+		Who:      r.config.Provider.Self().ID(),
+		Address:  address,
+		Multiple: ha,
+	})
 }
 
 // Cast sends a RPC call without waiting for a response (fire and forget)
