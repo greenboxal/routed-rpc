@@ -6,16 +6,19 @@ import (
 	"time"
 
 	"github.com/greenboxal/routed-rpc"
-	mb "github.com/hashicorp/memberlist"
 	"github.com/stretchr/testify/assert"
 )
 
 func setupProvider(port int) (*Memberlist, error) {
-	cfg := mb.DefaultLocalConfig()
+	cfg := &Config{}
 
 	cfg.Name = fmt.Sprintf("test_%d", port)
-	cfg.BindPort = port
-	cfg.AdvertisePort = port
+	cfg.BindAddr = "127.0.0.1"
+	cfg.WhispBindPort = port
+	cfg.RpcBindPort = port + 1
+	cfg.AdvertiseAddr = "127.0.0.1"
+	cfg.WhispAdvertisePort = port
+	cfg.RpcAdvertisePort = port + 1
 
 	return Create(cfg)
 }
@@ -25,7 +28,7 @@ func TestProvider(t *testing.T) {
 	assert.Nil(t, err)
 	assert.NotNil(t, providerA)
 
-	providerB, err := setupProvider(10001)
+	providerB, err := setupProvider(20000)
 	assert.Nil(t, err)
 	assert.NotNil(t, providerB)
 
