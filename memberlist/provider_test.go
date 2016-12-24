@@ -14,9 +14,9 @@ func setupProvider(port int) (*Provider, error) {
 
 	cfg.Name = fmt.Sprintf("test_%d", port)
 	cfg.WhispBindEndpoint = fmt.Sprintf("127.0.0.1:%d", port)
-	cfg.RpcBindEndpoint = fmt.Sprintf("127.0.0.1:%d", port+1)
+	cfg.RPCBindEndpoint = fmt.Sprintf("127.0.0.1:%d", port+1)
 	cfg.WhispAdvertiseEndpoint = fmt.Sprintf("127.0.0.1:%d", port)
-	cfg.RpcAdvertiseEndpoint = fmt.Sprintf("127.0.0.1:%d", port+1)
+	cfg.RPCAdvertiseEndpoint = fmt.Sprintf("127.0.0.1:%d", port+1)
 
 	return Create(cfg)
 }

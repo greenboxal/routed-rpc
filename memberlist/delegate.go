@@ -10,7 +10,7 @@ type delegate struct {
 }
 
 func (m *delegate) NodeMeta(limit int) []byte {
-	endpoint, err := net.ResolveTCPAddr("tcp", m.config.RpcAdvertiseEndpoint)
+	endpoint, err := net.ResolveTCPAddr("tcp", m.config.RPCAdvertiseEndpoint)
 
 	if err != nil {
 		panic(err)

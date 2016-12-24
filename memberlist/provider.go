@@ -43,7 +43,7 @@ func Create(config *Config) (*Provider, error) {
 }
 
 func (m *Provider) initializeRPCServer() error {
-	listener, err := net.Listen("tcp", m.config.RpcBindEndpoint)
+	listener, err := net.Listen("tcp", m.config.RPCBindEndpoint)
 
 	if err != nil {
 		return err
