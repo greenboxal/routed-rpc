@@ -18,5 +18,5 @@ type Provider interface {
 	Broadcast(msg interface{}) error
 
 	// Used to inject a reference to the Rpc instance attached to this provider
-	SetRpc(rpc *RPC)
+	SetRPC(rpc *RPC)
 }

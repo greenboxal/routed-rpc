@@ -10,7 +10,7 @@ import (
 	mb "github.com/hashicorp/memberlist"
 )
 
-type Memberlist struct {
+type Provider struct {
 	config   *Config
 	mutex    sync.RWMutex
 	rpc      *routedrpc.RPC
@@ -20,35 +20,30 @@ type Memberlist struct {
 	listener net.Listener
 }
 
-func Create(config *Config) (*Memberlist, error) {
-	result := &Memberlist{
+func Create(config *Config) (*Provider, error) {
+	provider := &Provider{
 		members: make(map[string]*node),
 		config:  config,
 	}
 
-	c := mb.DefaultLANConfig()
-
-	c.Name = config.Name
-	c.BindAddr = config.BindAddr
-	c.BindPort = config.WhispBindPort
-	c.AdvertiseAddr = config.AdvertiseAddr
-	c.AdvertisePort = config.WhispBindPort
-	c.Delegate = result
-	c.Events = result
-
-	memberlist, err := mb.Create(c)
-
-	if err != nil {
+	if err := provider.initializeRPCServer(); err != nil {
 		return nil, err
 	}
 
-	result.mb = memberlist
+	if err := provider.initializeMemberlist(); err != nil {
+		return nil, err
+	}
 
+	// Initialize local node
 	result.local = newNode(result, memberlist.LocalNode().Name)
 	result.local.update(memberlist.LocalNode())
 	result.members = append(result.memers, result.local)
 
-	result.listener, err = net.Listen("tcp", fmt.Sprintf("%s:%d", config.BindAddr, config.RpcBindPort))
+	return provider, nil
+}
+
+func (m *Provider) initializeRPCServer() error {
+	result.listener, err = net.Listen("tcp", m.config.RpcBindEndpoint)
 
 	if err != nil {
 		return nil, err
@@ -59,15 +54,41 @@ func Create(config *Config) (*Memberlist, error) {
 	return result, nil
 }
 
-func (m *Memberlist) Join(others []string) (int, error) {
+func (m *Provider) initializeMemberlist() error {
+	c := mb.DefaultLANConfig()
+
+	bind := net.ResolveTCPAddr("tcp", m.config.WhispBindEndpoint)
+	advertise := net.ResolveTCPAddr("tcp", m.config.WhispAdvertiseEndpoint)
+
+	c.Name = config.Name
+	c.BindAddr = bind.IP.String()
+	c.BindPort = bind.Port
+	c.AdvertiseAddr = advertise.IP.String()
+	c.AdvertisePort = advertise.Port
+	c.Delegate = delegate{m}
+	c.Events = delegate{m}
+
+	mb, err := mb.Create(c)
+
+	if err != nil {
+		return nil, err
+	}
+
+	result.mb = mb
+}
+
+// Join joins the current node into a cluster
+func (m *Provider) Join(others []string) (int, error) {
 	return m.mb.Join(others)
 }
 
-func (m *Memberlist) Self() routedrpc.Node {
+// Self returns the current node
+func (m *Provider) Self() routedrpc.Node {
 	return m.local
 }
 
-func (m *Memberlist) Members() []routedrpc.Node {
+// Members returns all members in the cluster including itself
+func (m *Provider) Members() []routedrpc.Node {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
@@ -82,7 +103,8 @@ func (m *Memberlist) Members() []routedrpc.Node {
 	return result
 }
 
-func (m *Memberlist) GetMember(id interface{}) (routedrpc.Node, bool) {
+// Returns a member by ID
+func (m *Provider) GetMember(id interface{}) (routedrpc.Node, bool) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
@@ -91,7 +113,8 @@ func (m *Memberlist) GetMember(id interface{}) (routedrpc.Node, bool) {
 	return node, found
 }
 
-func (m *Memberlist) Broadcast(msg interface{}) error {
+// Broadcast sends a message to all members
+func (m *Provider) Broadcast(msg interface{}) error {
 	data, err := encode(msg)
 
 	if err != nil {
@@ -105,11 +128,12 @@ func (m *Memberlist) Broadcast(msg interface{}) error {
 	return err
 }
 
-func (m *Memberlist) SetRpc(rpc *routedrpc.RPC) {
+// SetRPC saves the reference to the attached RPC instance
+func (m *Provider) SetRPC(rpc *routedrpc.RPC) {
 	m.rpc = rpc
 }
 
-func (m *Memberlist) Shutdown() error {
+func (m *Provider) Shutdown() error {
 	if err := m.mb.Shutdown(); err != nil {
 		return err
 	}
@@ -117,47 +141,7 @@ func (m *Memberlist) Shutdown() error {
 	return m.listener.Close()
 }
 
-func (m *Memberlist) NodeMeta(limit int) []byte {
-	addr := net.TCPAddr{
-		IP:   net.ParseIP(m.config.AdvertiseAddr),
-		Port: m.config.RpcAdvertisePort,
-	}
-
-	data, err := encode(addr)
-
-	if err != nil {
-		return nil
-	}
-
-	return data
-}
-
-func (m *Memberlist) NotifyMsg(data []byte) {
-	msg, err := decode(data)
-
-	if err != nil {
-		return
-	}
-
-	m.rpc.ProcessRPCMessage(msg)
-}
-
-func (m *Memberlist) GetBroadcasts(overhead, limit int) [][]byte {
-	return [][]byte{}
-}
-
-func (m *Memberlist) LocalState(join bool) []byte {
-	return []byte{}
-}
-
-func (m *Memberlist) MergeRemoteState(buf []byte, join bool) {
-}
-
-func (m *Memberlist) NotifyJoin(n *mb.Node) {
-	m.NotifyUpdate(n)
-}
-
-func (m *Memberlist) NotifyLeave(n *mb.Node) {
+func (m *Provider) removeNode(n *mb.Node) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -171,7 +155,7 @@ func (m *Memberlist) NotifyLeave(n *mb.Node) {
 	delete(m.members, n.Name)
 }
 
-func (m *Memberlist) NotifyUpdate(n *mb.Node) {
+func (m *Provider) updateNode(n *mb.Node) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -185,7 +169,7 @@ func (m *Memberlist) NotifyUpdate(n *mb.Node) {
 	item.update(n)
 }
 
-func (m *Memberlist) handleListener() {
+func (m *Provider) handleListener() {
 	for true {
 		conn, err := m.listener.Accept()
 
@@ -197,7 +181,7 @@ func (m *Memberlist) handleListener() {
 	}
 }
 
-func (m *Memberlist) handleConnection(conn net.Conn) {
+func (m *Provider) handleConnection(conn net.Conn) {
 	decoder := gob.NewDecoder(conn)
 
 	for true {

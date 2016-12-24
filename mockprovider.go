@@ -70,7 +70,7 @@ func (m *MockProvider) Broadcast(msg interface{}) error {
 	return nil
 }
 
-func (m *MockProvider) SetRpc(rpc *RPC) {
+func (m *MockProvider) SetRPC(rpc *RPC) {
 	m.rpc = rpc
 }
 

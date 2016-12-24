@@ -32,7 +32,7 @@ func Create(config *Config) *RPC {
 		config.Log = log.New(ioutil.Discard, "", 0)
 	}
 
-	config.Provider.SetRpc(rpc)
+	config.Provider.SetRPC(rpc)
 
 	return rpc
 }
