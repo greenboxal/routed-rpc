@@ -1,6 +1,7 @@
 package routedrpc
 
 import (
+	"log"
 	"time"
 )
 
@@ -23,6 +24,9 @@ type Config struct {
 
 	// ARP cache size
 	ArpCacheSize int
+
+	// Logger
+	Log *log.Logger
 }
 
 // DefaultConfig returns sane config defaults

@@ -27,6 +27,12 @@ func (h *MockHub) CreateClient(id int) *MockProvider {
 	return p
 }
 
+func (m *MockProvider) GetMember(id interface{}) (Node, bool) {
+	n, found := m.hub.nodes[id.(int)]
+
+	return n, found
+}
+
 func (m *MockProvider) Shutdown() error {
 	return nil
 }

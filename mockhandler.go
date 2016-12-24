@@ -27,8 +27,8 @@ func (n *MockHandler) WaitCast() {
 	<-n.CastSignal
 }
 
-func (n *MockHandler) HasTarget(target Address) bool {
-	return n.Name == target
+func (n *MockHandler) HasTarget(target Address) (bool, bool) {
+	return n.Name == target, true
 }
 
 func (n *MockHandler) HandleCast(sender, target Address, message interface{}) error {

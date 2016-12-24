@@ -23,11 +23,11 @@ func (n *StandardHandler) Deregister(address Address) {
 }
 
 // HasTarget returns if this target address can be processed in this node
-func (n *StandardHandler) HasTarget(target Address) bool {
+func (n *StandardHandler) HasTarget(target Address) (bool, bool) {
 	handler, found := n.handlers[target]
 
 	if !found {
-		return false
+		return false, false
 	}
 
 	return handler.HasTarget(target)

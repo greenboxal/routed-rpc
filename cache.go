@@ -2,6 +2,7 @@ package routedrpc
 
 import (
 	"container/list"
+	"fmt"
 	"github.com/hashicorp/golang-lru"
 	"sync"
 	"time"
@@ -22,10 +23,31 @@ func newCache(size int) *cache {
 	}
 }
 
-func (c *cache) Add(addr Address, name interface{}) {
+func (c *cache) Add(addr Address, name Node, multiple bool) error {
 	c.mutex.Lock()
 
-	c.entries.Add(addr, name)
+	if e, found := c.entries.Get(addr); found {
+		switch v := e.(type) {
+		case *cacheEntry:
+			v.Add(name)
+		case Node:
+			if name.ID() != v.ID() {
+				if !multiple {
+					c.mutex.Unlock()
+					return fmt.Errorf("multiple instances of '%v' detected", addr)
+				}
+
+				entry := newCacheEntry()
+				entry.Add(v)
+				entry.Add(name)
+
+				c.entries.Remove(addr)
+				c.entries.Add(addr, entry)
+			}
+		}
+	} else {
+		c.entries.Add(addr, name)
+	}
 
 	slot, found := c.waitSlots[addr]
 	if found {
@@ -38,16 +60,18 @@ func (c *cache) Add(addr Address, name interface{}) {
 		e := slot.Front()
 
 		for e != nil {
-			ch := e.Value.(chan interface{})
+			ch := e.Value.(chan Node)
 
 			ch <- name
 
 			e = e.Next()
 		}
 	}
+
+	return nil
 }
 
-func (c *cache) Get(addr Address) (interface{}, bool) {
+func (c *cache) Get(addr Address) (Node, bool) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
@@ -57,10 +81,10 @@ func (c *cache) Get(addr Address) (interface{}, bool) {
 		return nil, false
 	}
 
-	return value.(interface{}), true
+	return value.(Node), true
 }
 
-func (c *cache) WaitAndGet(addr Address, timeout time.Duration) (interface{}, bool) {
+func (c *cache) WaitAndGet(addr Address, timeout time.Duration) (Node, bool) {
 	c.mutex.Lock()
 
 	value, found := c.entries.Get(addr)
@@ -68,10 +92,10 @@ func (c *cache) WaitAndGet(addr Address, timeout time.Duration) (interface{}, bo
 	if found {
 		c.mutex.Unlock()
 
-		return value.(interface{}), true
+		return value.(Node), true
 	}
 
-	ch := make(chan interface{})
+	ch := make(chan Node)
 
 	slot, found := c.waitSlots[addr]
 
@@ -108,5 +132,5 @@ func (c *cache) WaitAndGet(addr Address, timeout time.Duration) (interface{}, bo
 		return nil, found
 	}
 
-	return value.(interface{}), true
+	return value.(Node), true
 }

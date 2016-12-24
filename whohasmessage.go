@@ -6,6 +6,7 @@ type whoHasRequest struct {
 }
 
 type whoHasReply struct {
-	Who     interface{}
-	Address Address
+	Who      interface{}
+	Address  Address
+	Multiple bool
 }

@@ -8,6 +8,9 @@ type Provider interface {
 	// Returns all nodes in the system (including itself)
 	Members() []Node
 
+	// Returns node by ID
+	GetMember(id interface{}) (Node, bool)
+
 	// Shutdowns the current node
 	Shutdown() error
 

@@ -1,6 +1,7 @@
 package routedrpc
 
 import (
+	"io/ioutil"
 	"log"
 	"reflect"
 	"sync"
@@ -27,6 +28,10 @@ func Create(config *Config) *RPC {
 		seq:     1,
 	}
 
+	if config.Log == nil {
+		config.Log = log.New(ioutil.Discard, "", 0)
+	}
+
 	config.Provider.SetRpc(rpc)
 
 	return rpc
@@ -50,39 +55,27 @@ func (r *RPC) Shutdown() error {
 	return r.config.Provider.Shutdown()
 }
 
-// WhoHas Returns which node is responsible for handling the provided address
+// WhoHas Returns which nodes can handle the provided address
 //
 // This information is retried either from the ARP cache or asked to the network
 func (r *RPC) WhoHas(target Address) (Node, error) {
-	if r.config.Handler.HasTarget(target) {
+	if ok, _ := r.config.Handler.HasTarget(target); ok {
 		return r.config.Provider.Self(), nil
 	}
 
-	name, found := r.cache.Get(target)
-
-	log.Printf("[DEBUG] routed-rpc: Looking address %+v\n", target)
+	node, found := r.cache.Get(target)
 
 	if !found {
-		log.Printf("[DEBUG] routed-rpc: Broadcasting who has request for %+v\n", target)
-
 		go r.config.Provider.Broadcast(whoHasRequest{
 			Sender:  r.config.Provider.Self().ID(),
 			Address: target,
 		})
 
-		name, found = r.cache.WaitAndGet(target, r.config.ArpTimeout)
+		node, found = r.cache.WaitAndGet(target, r.config.ArpTimeout)
 
 		if !found {
 			return nil, AddressNotFound{}
 		}
-	}
-
-	log.Printf("[DEBUG] routed-rpc: Found %+v on %s\n", target, name)
-
-	node, found := r.getNode(name)
-
-	if !found {
-		return nil, AddressNotFound{}
 	}
 
 	return node, nil
@@ -182,13 +175,13 @@ func (r *RPC) Call(target Address, args interface{}, reply interface{}) error {
 }
 
 func (r *RPC) sendMessage(msg *message) error {
-	log.Printf("[DEBUG] routed-rpc: Sending message (xid = %d) to %+v\n", msg.XID, msg.Target)
-
 	node, err := r.WhoHas(msg.Target)
 
 	if err != nil {
 		return err
 	}
+
+	r.config.Log.Printf("sending message to %v\n", node.ID())
 
 	return node.Send(msg)
 }
@@ -215,7 +208,7 @@ func (r *RPC) processMessage(msg *message) {
 	target := msg.Target
 
 	if msg.Type == castMessage || msg.Type == callMessage {
-		if !r.config.Handler.HasTarget(target) {
+		if ok, _ := r.config.Handler.HasTarget(target); !ok {
 			r.forwardMessage(msg)
 			return
 		}
@@ -248,7 +241,7 @@ func (r *RPC) processMessage(msg *message) {
 			reply = res
 		}
 
-		node, found := r.getNode(msg.SenderID)
+		node, found := r.config.Provider.GetMember(msg.SenderID)
 
 		if !found {
 			return
@@ -305,43 +298,43 @@ func (r *RPC) ProcessRPCMessage(msg interface{}) {
 		r.processMessage(v)
 	case message:
 		r.processMessage(&v)
-
-	default:
-		log.Printf("[ERROR] routed-rpc: Invalid message: %+v\n", v)
 	}
 }
 
 func (r *RPC) processWhoHasRequest(req *whoHasRequest) {
-	log.Printf("[DEBUG] routed-rpc: Requested advice for %+v\n", req.Address)
+	ok, ha := r.config.Handler.HasTarget(req.Address)
 
-	if !r.config.Handler.HasTarget(req.Address) {
+	if !ok {
 		return
 	}
 
-	sender, found := r.getNode(req.Sender)
+	sender, found := r.config.Provider.GetMember(req.Sender)
 
 	if !found {
 		return
 	}
 
 	sender.Send(whoHasReply{
-		Who:     r.config.Provider.Self().ID(),
-		Address: req.Address,
+		Who:      r.config.Provider.Self().ID(),
+		Address:  req.Address,
+		Multiple: ha,
 	})
 }
 
 func (r *RPC) processWhoHasReply(reply *whoHasReply) {
-	log.Printf("[DEBUG] routed-rpc: Got advice that %+v is in %s\n", reply.Address, reply.Who)
+	member, found := r.config.Provider.GetMember(reply.Who)
 
-	r.cache.Add(reply.Address, reply.Who)
-}
-
-func (r *RPC) getNode(id interface{}) (Node, bool) {
-	for _, n := range r.config.Provider.Members() {
-		if n.ID() == id {
-			return n, true
-		}
+	if !found {
+		r.config.Log.Printf("error adding %v to cache: %v doesn't exist\n", reply.Address, reply.Who)
+		return
 	}
 
-	return nil, false
+	err := r.cache.Add(reply.Address, member, reply.Multiple)
+
+	if err != nil {
+		r.config.Log.Printf("error adding %v on %v to cache: %s\n", reply.Address, member.ID(), err.Error())
+		return
+	}
+
+	r.config.Log.Printf("adding %v on %v (ha = %v)", reply.Address, member.ID(), reply.Multiple)
 }
