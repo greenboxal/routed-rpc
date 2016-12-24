@@ -47,8 +47,6 @@ func Create(config *Config) (*Provider, error) {
 }
 
 func (m *Provider) sanitizeConfig() error {
-	c := mb.DefaultLANConfig()
-
 	whispBind, err := net.ResolveTCPAddr("tcp", m.config.WhispBindEndpoint)
 
 	if err != nil {
@@ -61,13 +59,13 @@ func (m *Provider) sanitizeConfig() error {
 		return err
 	}
 
-	rpcBind, err := net.ResolveTCPAddr("tcp", m.config.WhispBindEndpoint)
+	rpcBind, err := net.ResolveTCPAddr("tcp", m.config.RPCBindEndpoint)
 
 	if err != nil {
 		return err
 	}
 
-	rpcAdvertise, err := net.ResolveTCPAddr("tcp", m.config.WhispAdvertiseEndpoint)
+	rpcAdvertise, err := net.ResolveTCPAddr("tcp", m.config.RPCAdvertiseEndpoint)
 
 	if err != nil {
 		return err
