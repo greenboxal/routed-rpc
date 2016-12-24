@@ -2,7 +2,6 @@ package memberlist
 
 import (
 	"encoding/gob"
-	"fmt"
 	"net"
 	"sync"
 
@@ -35,46 +34,60 @@ func Create(config *Config) (*Provider, error) {
 	}
 
 	// Initialize local node
-	result.local = newNode(result, memberlist.LocalNode().Name)
-	result.local.update(memberlist.LocalNode())
-	result.members = append(result.memers, result.local)
+	local := provider.mb.LocalNode()
+	provider.local = newNode(provider, local.Name)
+	provider.local.update(local)
+	provider.members[local.Name] = provider.local
 
 	return provider, nil
 }
 
 func (m *Provider) initializeRPCServer() error {
-	result.listener, err = net.Listen("tcp", m.config.RpcBindEndpoint)
+	listener, err := net.Listen("tcp", m.config.RpcBindEndpoint)
 
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	go result.handleListener()
+	m.listener = listener
 
-	return result, nil
+	go m.handleListener()
+
+	return nil
 }
 
 func (m *Provider) initializeMemberlist() error {
 	c := mb.DefaultLANConfig()
 
-	bind := net.ResolveTCPAddr("tcp", m.config.WhispBindEndpoint)
-	advertise := net.ResolveTCPAddr("tcp", m.config.WhispAdvertiseEndpoint)
+	bind, err := net.ResolveTCPAddr("tcp", m.config.WhispBindEndpoint)
 
-	c.Name = config.Name
+	if err != nil {
+		return err
+	}
+
+	advertise, err := net.ResolveTCPAddr("tcp", m.config.WhispAdvertiseEndpoint)
+
+	if err != nil {
+		return err
+	}
+
+	c.Name = m.config.Name
 	c.BindAddr = bind.IP.String()
 	c.BindPort = bind.Port
 	c.AdvertiseAddr = advertise.IP.String()
 	c.AdvertisePort = advertise.Port
-	c.Delegate = delegate{m}
-	c.Events = delegate{m}
+	c.Delegate = &delegate{m}
+	c.Events = &delegate{m}
 
 	mb, err := mb.Create(c)
 
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	result.mb = mb
+	m.mb = mb
+
+	return nil
 }
 
 // Join joins the current node into a cluster

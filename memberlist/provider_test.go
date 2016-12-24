@@ -9,16 +9,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func setupProvider(port int) (*Memberlist, error) {
+func setupProvider(port int) (*Provider, error) {
 	cfg := &Config{}
 
 	cfg.Name = fmt.Sprintf("test_%d", port)
-	cfg.BindAddr = "127.0.0.1"
-	cfg.WhispBindPort = port
-	cfg.RpcBindPort = port + 1
-	cfg.AdvertiseAddr = "127.0.0.1"
-	cfg.WhispAdvertisePort = port
-	cfg.RpcAdvertisePort = port + 1
+	cfg.WhispBindEndpoint = fmt.Sprintf("127.0.0.1:%d", port)
+	cfg.RpcBindEndpoint = fmt.Sprintf("127.0.0.1:%d", port+1)
+	cfg.WhispAdvertiseEndpoint = fmt.Sprintf("127.0.0.1:%d", port)
+	cfg.RpcAdvertiseEndpoint = fmt.Sprintf("127.0.0.1:%d", port+1)
 
 	return Create(cfg)
 }

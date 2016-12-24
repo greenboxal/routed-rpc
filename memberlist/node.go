@@ -19,8 +19,8 @@ type node struct {
 	addr net.TCPAddr
 	conn *nodeConnection
 
-	current *mb.Node
-	m       *Memberlist
+	current  *mb.Node
+	provider *Provider
 
 	offline bool
 }
@@ -36,11 +36,11 @@ func init() {
 	gob.Register(net.TCPAddr{})
 }
 
-func newNode(m *Memberlist, id string) *node {
+func newNode(m *Provider, id string) *node {
 	return &node{
-		id:      id,
-		m:       m,
-		offline: true,
+		id:       id,
+		provider: m,
+		offline:  true,
 	}
 }
 
@@ -174,6 +174,6 @@ func (n *node) connectionHandler(conn *nodeConnection) {
 			break
 		}
 
-		n.m.rpc.ProcessRPCMessage(value)
+		n.provider.rpc.ProcessRPCMessage(value)
 	}
 }
