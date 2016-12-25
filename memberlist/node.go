@@ -67,6 +67,10 @@ func (n *node) Send(msg interface{}) error {
 	return conn.encoder.Encode(&msg)
 }
 
+func (n *node) Online() bool {
+	return !n.offline
+}
+
 func (n *node) sendRaw(data []byte) error {
 	if n.offline {
 		return errors.New("member is offline")

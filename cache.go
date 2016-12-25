@@ -28,7 +28,7 @@ func (c *cache) Add(addr Address, name Node, multiple bool) error {
 
 	if e, found := c.entries.Get(addr); found {
 		switch v := e.(type) {
-		case *cacheEntry:
+		case *multiNode:
 			v.Add(name)
 		case Node:
 			if name.ID() != v.ID() {

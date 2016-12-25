@@ -5,9 +5,10 @@ type MockHub struct {
 }
 
 type MockProvider struct {
-	id  int
-	hub *MockHub
-	rpc *RPC
+	id     int
+	hub    *MockHub
+	rpc    *RPC
+	online bool
 }
 
 func NewMockHub() *MockHub {
@@ -18,8 +19,9 @@ func NewMockHub() *MockHub {
 
 func (h *MockHub) CreateClient(id int) *MockProvider {
 	p := &MockProvider{
-		id:  id,
-		hub: h,
+		id:     id,
+		hub:    h,
+		online: true,
 	}
 
 	h.nodes[id] = p
@@ -34,6 +36,7 @@ func (m *MockProvider) GetMember(id interface{}) (Node, bool) {
 }
 
 func (m *MockProvider) Shutdown() error {
+	m.online = false
 	return nil
 }
 
@@ -56,6 +59,14 @@ func (m *MockProvider) Members() []Node {
 	}
 
 	return result
+}
+
+func (m *MockProvider) Online() bool {
+	return m.online
+}
+
+func (m *MockProvider) SetOnline(online bool) {
+	m.online = online
 }
 
 func (m *MockProvider) Broadcast(msg interface{}) error {
