@@ -1,6 +1,6 @@
 package routedrpc
 
-// A Call represnts a pending responde from the RPC system
+// A Call represnts a pending responde from the cluster
 type Call struct {
 	arrived chan *Call
 

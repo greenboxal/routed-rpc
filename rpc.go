@@ -9,8 +9,8 @@ import (
 	"github.com/Sirupsen/logrus"
 )
 
-// RPC holds state for the current node in the system
-type RPC struct {
+// Cluster holds state for the current node in the system
+type Cluster struct {
 	cache  *cache
 	config *Config
 
@@ -23,9 +23,9 @@ type RPC struct {
 	handler  Handler
 }
 
-// Create a Rpc instance
-func Create(config *Config) *RPC {
-	rpc := &RPC{
+// Create a Cluster instance
+func Create(config *Config) *Cluster {
+	cluster := &Cluster{
 		config:   config,
 		provider: config.Provider,
 		handler:  config.Handler,
@@ -39,23 +39,23 @@ func Create(config *Config) *RPC {
 		config.Log = logrus.WithField("component", "routedrpc")
 	}
 
-	config.Provider.SetRPC(rpc)
+	cluster.provider.SetCluster(cluster)
 
-	return rpc
+	return cluster
 }
 
 // Provider returns the provider used
-func (r *RPC) Provider() Provider {
+func (r *Cluster) Provider() Provider {
 	return r.provider
 }
 
 // Handler returns the handler used
-func (r *RPC) Handler() Handler {
+func (r *Cluster) Handler() Handler {
 	return r.handler
 }
 
 // Shutdown stops this node operations
-func (r *RPC) Shutdown() error {
+func (r *Cluster) Shutdown() error {
 	// Cleanup pending calls
 	r.mutex.Lock()
 	pending := r.pending
@@ -75,7 +75,7 @@ func (r *RPC) Shutdown() error {
 // WhoHas Returns which nodes can handle the provided address
 //
 // This information is retried either from the ARP cache or asked to the network
-func (r *RPC) WhoHas(target Address) (Node, error) {
+func (r *Cluster) WhoHas(target Address) (Node, error) {
 	if ok, _ := r.handler.HasTarget(target); ok {
 		return r.provider.Self(), nil
 	}
@@ -106,7 +106,7 @@ func (r *RPC) WhoHas(target Address) (Node, error) {
 //
 // This useful on HA addresses when starting a new node, forcing the others
 // to acknowledge the new handler before their ARP cache expires
-func (r *RPC) Advertise(address Address) error {
+func (r *Cluster) Advertise(address Address) error {
 	ok, ha := r.handler.HasTarget(address)
 
 	if !ok {
@@ -121,7 +121,7 @@ func (r *RPC) Advertise(address Address) error {
 }
 
 // Cast sends a RPC call without waiting for a response (fire and forget)
-func (r *RPC) Cast(sender, target Address, msg interface{}) error {
+func (r *Cluster) Cast(sender, target Address, msg interface{}) error {
 	return r.sendMessage(&message{
 		XID:             0,
 		SenderID:        r.provider.Self().ID(),
@@ -134,7 +134,7 @@ func (r *RPC) Cast(sender, target Address, msg interface{}) error {
 }
 
 // GoWithTimeout Sends a RPC call to _target_
-func (r *RPC) GoWithTimeout(sender, target Address, args interface{}, reply interface{}, done chan *Call, timeout time.Duration) *Call {
+func (r *Cluster) GoWithTimeout(sender, target Address, args interface{}, reply interface{}, done chan *Call, timeout time.Duration) *Call {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -197,23 +197,23 @@ func (r *RPC) GoWithTimeout(sender, target Address, args interface{}, reply inte
 }
 
 // Go sends a RPC call to _target_
-func (r *RPC) Go(sender, target Address, args interface{}, reply interface{}, done chan *Call) *Call {
+func (r *Cluster) Go(sender, target Address, args interface{}, reply interface{}, done chan *Call) *Call {
 	return r.GoWithTimeout(sender, target, args, reply, done, r.config.CallTimeout)
 }
 
 // CallWithTimeout sends a RPC call to _target_
-func (r *RPC) CallWithTimeout(sender, target Address, args interface{}, reply interface{}, timeout time.Duration) error {
+func (r *Cluster) CallWithTimeout(sender, target Address, args interface{}, reply interface{}, timeout time.Duration) error {
 	call := <-r.GoWithTimeout(sender, target, args, reply, make(chan *Call, 1), timeout).Done
 
 	return call.Error
 }
 
 // Call sends a RPC call to _target_
-func (r *RPC) Call(sender, target Address, args interface{}, reply interface{}) error {
+func (r *Cluster) Call(sender, target Address, args interface{}, reply interface{}) error {
 	return r.CallWithTimeout(sender, target, args, reply, r.config.CallTimeout)
 }
 
-func (r *RPC) sendMessage(msg *message) error {
+func (r *Cluster) sendMessage(msg *message) error {
 	node, err := r.WhoHas(msg.Target)
 
 	if err != nil {
@@ -223,7 +223,7 @@ func (r *RPC) sendMessage(msg *message) error {
 	return node.Send(msg)
 }
 
-func (r *RPC) forwardMessage(msg *message) {
+func (r *Cluster) forwardMessage(msg *message) {
 	if msg.ForwardingCount > r.config.ForwardingLimit {
 		msg = &message{
 			XID:             msg.XID,
@@ -248,7 +248,7 @@ func (r *RPC) forwardMessage(msg *message) {
 	r.sendMessage(msg)
 }
 
-func (r *RPC) processMessage(msg *message) {
+func (r *Cluster) processMessage(msg *message) {
 	target := msg.Target
 
 	if msg.Type == castMessage || msg.Type == callMessage {
@@ -326,7 +326,7 @@ func (r *RPC) processMessage(msg *message) {
 }
 
 // ProcessRPCMessage should be called by the Provider implementation in order to forward system messages
-func (r *RPC) ProcessRPCMessage(msg interface{}) {
+func (r *Cluster) ProcessRPCMessage(msg interface{}) {
 	switch v := msg.(type) {
 	case *whoHasRequest:
 		r.processWhoHasRequest(v)
@@ -345,7 +345,7 @@ func (r *RPC) ProcessRPCMessage(msg interface{}) {
 	}
 }
 
-func (r *RPC) processWhoHasRequest(req *whoHasRequest) {
+func (r *Cluster) processWhoHasRequest(req *whoHasRequest) {
 	ok, ha := r.handler.HasTarget(req.Address)
 
 	if !ok {
@@ -366,7 +366,7 @@ func (r *RPC) processWhoHasRequest(req *whoHasRequest) {
 	})
 }
 
-func (r *RPC) processWhoHasReply(reply *whoHasReply) {
+func (r *Cluster) processWhoHasReply(reply *whoHasReply) {
 	member, found := r.provider.GetMember(reply.Who)
 
 	if !found {

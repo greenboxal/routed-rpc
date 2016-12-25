@@ -1,6 +1,6 @@
 package routedrpc
 
-// An AddressNotFound is returned when an address isn't found in the RPC system
+// An AddressNotFound is returned when an address isn't found in the cluster
 type AddressNotFound struct {
 }
 

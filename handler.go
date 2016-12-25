@@ -8,9 +8,9 @@ type Handler interface {
 	// to high availability setups
 	HasTarget(target Address) (ok bool, multiple bool)
 
-	// Handles calls for Rpc.Cast
+	// Handles calls for Cluster.Cast
 	HandleCast(sender, target Address, message interface{}) error
 
-	// Handles calls for Rpc.Call and Rpc.Go
+	// Handles calls for Cluster.Call and Rpc.Go
 	HandleCall(sender, target Address, message interface{}) (interface{}, error)
 }

@@ -178,6 +178,6 @@ func (n *node) connectionHandler(conn *nodeConnection) {
 			break
 		}
 
-		n.provider.rpc.ProcessRPCMessage(value)
+		n.provider.cluster.ProcessRPCMessage(value)
 	}
 }

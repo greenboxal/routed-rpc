@@ -1,6 +1,6 @@
 package routedrpc
 
-// Node represents a node in the RPC system
+// Node represents a node in the cluster
 type Node interface {
 	// Returns the node ID
 	ID() interface{}

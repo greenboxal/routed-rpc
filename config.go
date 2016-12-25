@@ -6,7 +6,7 @@ import (
 	"github.com/Sirupsen/logrus"
 )
 
-// Config holds the configuration for Rpc
+// Config holds the configuration for the cluster
 type Config struct {
 	// Distributed system provider
 	Provider Provider

@@ -14,7 +14,7 @@ import (
 type Provider struct {
 	config   *Config
 	mutex    sync.RWMutex
-	rpc      *routedrpc.RPC
+	cluster  *routedrpc.Cluster
 	mb       *mb.Memberlist
 	local    *node
 	members  map[string]*node
@@ -200,9 +200,9 @@ func (m *Provider) Broadcast(msg interface{}) error {
 	return err
 }
 
-// SetRPC saves the reference to the attached RPC instance
-func (m *Provider) SetRPC(rpc *routedrpc.RPC) {
-	m.rpc = rpc
+// SetCluster saves the reference to the attached cluster
+func (m *Provider) SetCluster(cluster *routedrpc.Cluster) {
+	m.cluster = cluster
 }
 
 func (m *Provider) Shutdown() error {
@@ -273,7 +273,7 @@ func (m *Provider) handleConnection(conn net.Conn) {
 			break
 		}
 
-		m.rpc.ProcessRPCMessage(msg)
+		m.cluster.ProcessRPCMessage(msg)
 	}
 }
 

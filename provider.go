@@ -1,11 +1,11 @@
 package routedrpc
 
-// Provider should implement network level details for the RPC system
+// Provider should implement network level details for the cluster
 type Provider interface {
 	// Returns information about the current node
 	Self() Node
 
-	// Returns all nodes in the system (including itself)
+	// Returns all nodes in the cluster (including itself)
 	Members() []Node
 
 	// Returns node by ID
@@ -17,6 +17,6 @@ type Provider interface {
 	// Sends a message to all nodes (excluding itself
 	Broadcast(msg interface{}) error
 
-	// Used to inject a reference to the Rpc instance attached to this provider
-	SetRPC(rpc *RPC)
+	// Used to inject a reference to the cluster instance attached to this provider
+	SetCluster(cluster *Cluster)
 }

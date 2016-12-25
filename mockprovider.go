@@ -5,10 +5,10 @@ type MockHub struct {
 }
 
 type MockProvider struct {
-	id     int
-	hub    *MockHub
-	rpc    *RPC
-	online bool
+	id      int
+	hub     *MockHub
+	cluster *Cluster
+	online  bool
 }
 
 func NewMockHub() *MockHub {
@@ -81,12 +81,12 @@ func (m *MockProvider) Broadcast(msg interface{}) error {
 	return nil
 }
 
-func (m *MockProvider) SetRPC(rpc *RPC) {
-	m.rpc = rpc
+func (m *MockProvider) SetCluster(cluster *Cluster) {
+	m.cluster = cluster
 }
 
 func (m *MockProvider) Send(msg interface{}) error {
-	go m.rpc.ProcessRPCMessage(msg)
+	go m.cluster.ProcessRPCMessage(msg)
 
 	return nil
 }
