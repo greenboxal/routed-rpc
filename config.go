@@ -34,7 +34,7 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Provider:        nil,
-		Handler:         NewStandardHandler(),
+		Handler:         NewMuxHandler(),
 		ForwardingLimit: 5,
 		CallTimeout:     2 * time.Second,
 		ArpTimeout:      1 * time.Second,

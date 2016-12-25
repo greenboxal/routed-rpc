@@ -17,15 +17,22 @@ type RPC struct {
 	seq     uint64
 	mutex   sync.Mutex
 	pending map[uint64]*Call
+
+	log      *logrus.Entry
+	provider Provider
+	handler  Handler
 }
 
 // Create a Rpc instance
 func Create(config *Config) *RPC {
 	rpc := &RPC{
-		config:  config,
-		cache:   newCache(config.ArpCacheSize),
-		pending: make(map[uint64]*Call),
-		seq:     1,
+		config:   config,
+		provider: config.Provider,
+		handler:  config.Handler,
+		log:      config.Log,
+		cache:    newCache(config.ArpCacheSize),
+		pending:  make(map[uint64]*Call),
+		seq:      1,
 	}
 
 	if config.Log == nil {
@@ -35,6 +42,16 @@ func Create(config *Config) *RPC {
 	config.Provider.SetRPC(rpc)
 
 	return rpc
+}
+
+// Provider returns the provider used
+func (r *RPC) Provider() Provider {
+	return r.provider
+}
+
+// Handler returns the handler used
+func (r *RPC) Handler() Handler {
+	return r.handler
 }
 
 // Shutdown stops this node operations
@@ -52,22 +69,22 @@ func (r *RPC) Shutdown() error {
 	}
 
 	// Shutdown the node
-	return r.config.Provider.Shutdown()
+	return r.provider.Shutdown()
 }
 
 // WhoHas Returns which nodes can handle the provided address
 //
 // This information is retried either from the ARP cache or asked to the network
 func (r *RPC) WhoHas(target Address) (Node, error) {
-	if ok, _ := r.config.Handler.HasTarget(target); ok {
-		return r.config.Provider.Self(), nil
+	if ok, _ := r.handler.HasTarget(target); ok {
+		return r.provider.Self(), nil
 	}
 
 	node, found := r.cache.Get(target)
 
 	if !found {
-		err := r.config.Provider.Broadcast(whoHasRequest{
-			Sender:  r.config.Provider.Self().ID(),
+		err := r.provider.Broadcast(whoHasRequest{
+			Sender:  r.provider.Self().ID(),
 			Address: target,
 		})
 
@@ -90,14 +107,14 @@ func (r *RPC) WhoHas(target Address) (Node, error) {
 // This useful on HA addresses when starting a new node, forcing the others
 // to acknowledge the new handler before their ARP cache expires
 func (r *RPC) Advertise(address Address) error {
-	ok, ha := r.config.Handler.HasTarget(address)
+	ok, ha := r.handler.HasTarget(address)
 
 	if !ok {
 		return AddressNotFound{}
 	}
 
-	return r.config.Provider.Broadcast(whoHasReply{
-		Who:      r.config.Provider.Self().ID(),
+	return r.provider.Broadcast(whoHasReply{
+		Who:      r.provider.Self().ID(),
 		Address:  address,
 		Multiple: ha,
 	})
@@ -107,7 +124,7 @@ func (r *RPC) Advertise(address Address) error {
 func (r *RPC) Cast(sender, target Address, msg interface{}) error {
 	return r.sendMessage(&message{
 		XID:             0,
-		SenderID:        r.config.Provider.Self().ID(),
+		SenderID:        r.provider.Self().ID(),
 		Sender:          sender,
 		Target:          target,
 		ForwardingCount: 0,
@@ -150,7 +167,7 @@ func (r *RPC) GoWithTimeout(sender, target Address, args interface{}, reply inte
 	go func() {
 		err := r.sendMessage(&message{
 			XID:             xid,
-			SenderID:        r.config.Provider.Self().ID(),
+			SenderID:        r.provider.Self().ID(),
 			Sender:          sender,
 			Target:          target,
 			ForwardingCount: 0,
@@ -218,7 +235,7 @@ func (r *RPC) forwardMessage(msg *message) {
 			Message:         AddressNotFound{},
 		}
 
-		r.config.Log.WithFields(logrus.Fields{
+		r.log.WithFields(logrus.Fields{
 			"xid":      msg.XID,
 			"sender":   msg.Sender,
 			"senderid": msg.SenderID,
@@ -235,7 +252,7 @@ func (r *RPC) processMessage(msg *message) {
 	target := msg.Target
 
 	if msg.Type == castMessage || msg.Type == callMessage {
-		if ok, _ := r.config.Handler.HasTarget(target); !ok {
+		if ok, _ := r.handler.HasTarget(target); !ok {
 			r.forwardMessage(msg)
 			return
 		}
@@ -243,7 +260,7 @@ func (r *RPC) processMessage(msg *message) {
 
 	switch msg.Type {
 	case castMessage:
-		err := r.config.Handler.HandleCast(msg.Sender, target, msg.Message)
+		err := r.handler.HandleCast(msg.Sender, target, msg.Message)
 
 		if _, ok := err.(AddressNotFound); ok {
 			r.forwardMessage(msg)
@@ -253,7 +270,7 @@ func (r *RPC) processMessage(msg *message) {
 		var typ messageType
 		var reply interface{}
 
-		res, err := r.config.Handler.HandleCall(msg.Sender, target, msg.Message)
+		res, err := r.handler.HandleCall(msg.Sender, target, msg.Message)
 
 		if err != nil {
 			if _, ok := err.(AddressNotFound); ok {
@@ -268,7 +285,7 @@ func (r *RPC) processMessage(msg *message) {
 			reply = res
 		}
 
-		node, found := r.config.Provider.GetMember(msg.SenderID)
+		node, found := r.provider.GetMember(msg.SenderID)
 
 		if !found {
 			return
@@ -277,7 +294,7 @@ func (r *RPC) processMessage(msg *message) {
 		node.Send(&message{
 			XID:             msg.XID,
 			Sender:          nil,
-			SenderID:        r.config.Provider.Self().ID(),
+			SenderID:        r.provider.Self().ID(),
 			Target:          nil,
 			ForwardingCount: 0,
 			Type:            typ,
@@ -329,38 +346,38 @@ func (r *RPC) ProcessRPCMessage(msg interface{}) {
 }
 
 func (r *RPC) processWhoHasRequest(req *whoHasRequest) {
-	ok, ha := r.config.Handler.HasTarget(req.Address)
+	ok, ha := r.handler.HasTarget(req.Address)
 
 	if !ok {
 		return
 	}
 
-	sender, found := r.config.Provider.GetMember(req.Sender)
+	sender, found := r.provider.GetMember(req.Sender)
 
 	if !found {
-		r.config.Log.WithField("sender", req.Sender).Warn("sender not found when replying to whohas")
+		r.log.WithField("sender", req.Sender).Warn("sender not found when replying to whohas")
 		return
 	}
 
 	sender.Send(whoHasReply{
-		Who:      r.config.Provider.Self().ID(),
+		Who:      r.provider.Self().ID(),
 		Address:  req.Address,
 		Multiple: ha,
 	})
 }
 
 func (r *RPC) processWhoHasReply(reply *whoHasReply) {
-	member, found := r.config.Provider.GetMember(reply.Who)
+	member, found := r.provider.GetMember(reply.Who)
 
 	if !found {
-		r.config.Log.WithField("who", reply.Who).Warn("memer not found when parsing whohas reply")
+		r.log.WithField("who", reply.Who).Warn("memer not found when parsing whohas reply")
 		return
 	}
 
 	err := r.cache.Add(reply.Address, member, reply.Multiple)
 
 	if err != nil {
-		r.config.Log.WithError(err).WithFields(logrus.Fields{
+		r.log.WithError(err).WithFields(logrus.Fields{
 			"who":      reply.Who,
 			"address":  reply.Address,
 			"multiple": reply.Multiple,
