@@ -54,6 +54,10 @@ func (r *Cluster) Handler() Handler {
 	return r.handler
 }
 
+func (r *Cluster) SetHandler(handler Handler) {
+	r.handler = handler
+}
+
 // Shutdown stops this node operations
 func (r *Cluster) Shutdown() error {
 	// Cleanup pending calls
